@@ -1,17 +1,20 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ChatOpenAI } from '@langchain/openai';
+import { BufferMemory } from 'langchain/memory';
 import TelegramBot, { Message } from 'node-telegram-bot-api';
-import * as fs from 'fs';
-import OpenAI from 'openai';
-import { ChatCompletionMessageParam } from 'openai/resources';
 import { PM_PROMPT } from './constants';
+import { createTaskTool, toolsList } from 'src/task/task.tool';
+import { MessageContent } from '@langchain/core/messages';
+import { ChatCompletionMessageParam } from 'openai/resources';
+import { ToolCall } from '@langchain/core/dist/messages/tool';
 
 @Injectable()
 export class TelegramService implements OnModuleInit {
   private bot: TelegramBot;
-  private openai: OpenAI;
+  private openai: ChatOpenAI;
   private readonly prompt: string;
-  private chatHistory: Map<number, ChatCompletionMessageParam[]>;
+  private memory: BufferMemory;
 
   constructor(private configService: ConfigService) {
     const TELEGRAM_BOT_TOKEN =
@@ -23,9 +26,12 @@ export class TelegramService implements OnModuleInit {
     }
 
     this.bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-    this.openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+    this.openai = new ChatOpenAI({
+      model: 'gpt-4o-mini',
+      temperature: 0,
+    });
 
-    this.chatHistory = new Map();
+    this.memory = new BufferMemory({ returnMessages: true });
     this.prompt = PM_PROMPT;
   }
 
@@ -37,28 +43,19 @@ export class TelegramService implements OnModuleInit {
         const chatId = msg.chat.id;
         const userMessage = msg.text?.trim() || '';
 
-        if (userMessage === '/start') {
-          this.chatHistory.set(chatId, [
-            { role: 'system', content: this.prompt },
-          ]);
+        await this.bot.sendMessage(
+          chatId,
+          `chatId: ${chatId}, userMessage: ${userMessage}`,
+        );
 
+        if (userMessage === '/start') {
           await this.bot.sendMessage(
             chatId,
             '👋 Привет! Опишите проект, и я помогу собрать ТЗ.',
           );
-
+        } else {
           const response = await this.chatWithGPT(userMessage);
-
-          if (response.includes('##READY_FOR_SAVE##')) {
-            this.saveRequirementsToFile(response);
-            await this.bot.sendMessage(
-              chatId,
-              '❓ Вас устраивает ТЗ? Ответьте *да* или *нет*.',
-              { parse_mode: 'Markdown' },
-            );
-          } else {
-            await this.bot.sendMessage(chatId, response);
-          }
+          await this.bot.sendMessage(chatId, JSON.stringify(response));
         }
       } catch (error) {
         console.error('Ошибка в Telegram-боте:', (error as Error).message);
@@ -66,40 +63,64 @@ export class TelegramService implements OnModuleInit {
     });
   }
 
-  private async chatWithGPT(
-    chatId: number,
-    userMessage: string,
-  ): Promise<string> {
+  private async chatWithGPT(userMessage: string): Promise<MessageContent> {
     try {
-      // Получаем историю чата или создаём новую
-      const history = this.chatHistory.get(chatId) || [
-        { role: 'system', content: this.prompt },
-      ];
-      history.push({ role: 'user', content: userMessage });
+      // Сохраняем сообщение пользователя в памяти
+      await this.memory.saveContext(
+        { input: userMessage },
+        { output: '...' }, // Пока оставляем пустым, но позже заменим на ответ модели
+      );
 
-      // Отправляем историю в OpenAI
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: history,
-      });
+      // Получаем всю историю сообщений
+      const chatHistory = await this.memory.loadMemoryVariables({});
 
-      const aiResponse =
-        response.choices[0]?.message?.content || 'Ошибка в ответе от ChatGPT';
+      // Явно указываем, что `history` — это массив сообщений OpenAI
+      const messages: ChatCompletionMessageParam[] = Array.isArray(
+        chatHistory.history,
+      )
+        ? (chatHistory.history as ChatCompletionMessageParam[])
+        : [];
 
-      // Добавляем ответ AI в историю
-      history.push({ role: 'assistant', content: aiResponse });
+      // Генерируем ответ модели
+      const response = await this.openai
+        .bindTools([createTaskTool])
+        .invoke(JSON.stringify(messages));
 
-      // Сохраняем обновлённую историю
-      this.chatHistory.set(chatId, history.slice(-10)); // Храним только последние 10 сообщений
+      const aiResponse = response.content;
+
+      console.log('response', response);
+
+      if (response.tool_calls) {
+        for (const toolCall of response.tool_calls) {
+          const selectedTool = toolsList.get(toolCall.name);
+          if (selectedTool) {
+            const toolMessage = await selectedTool.invoke(toolCall as ToolCall);
+
+            await this.memory.saveContext(
+              { input: userMessage },
+              { output: aiResponse },
+            );
+
+            return toolMessage.content;
+          } else {
+            return 'Ошибка инструмента:' + toolCall.name;
+          }
+        }
+      }
+
+      await this.memory.saveContext(
+        { input: userMessage },
+        { output: aiResponse },
+      );
 
       return aiResponse;
     } catch (error) {
       console.error('Ошибка OpenAI:', (error as Error).message);
-      return 'Произошла ошибка при обращении к AI 😔';
+      return 'Произошла ошибка при обращении к AI';
     }
   }
 
-  createTask(content: string): string {
+  /*   createTask(content: string): string {
     try {
       const filePath = 'requirements.md';
       fs.writeFileSync(filePath, content);
@@ -108,5 +129,5 @@ export class TelegramService implements OnModuleInit {
       console.error('Ошибка записи в файл:', (error as Error).message);
       return '';
     }
-  }
+  } */
 }
