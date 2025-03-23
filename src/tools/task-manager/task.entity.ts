@@ -11,6 +11,9 @@ export class TaskEntity {
   id: string;
 
   @Column()
+  code: string;
+
+  @Column()
   title: string;
 
   @Column()
@@ -25,8 +28,8 @@ export class TaskEntity {
   @Column('text')
   description: string;
 
-  @Column('json', { nullable: true })
-  subtasks: { id: string; title: string }[];
+  @Column('simple-json', { nullable: true })
+  subtasks_codes: string[];
 
   @CreateDateColumn()
   created_at: Date;

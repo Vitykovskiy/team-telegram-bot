@@ -1,18 +1,17 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { TelegramModule } from './telegram/telegram.module';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { TaskEntity } from './task/task.entity';
-import { TaskService } from './task/task.service';
+import { TaskEntity } from './tools/task-manager/task.entity';
+import { TelegramService } from './telegram/telegram.service';
+import { TaskManagerService } from './tools/task-manager/task-manager.service';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true, // Делаем ConfigModule доступным во всем приложении
     }),
-    TelegramModule,
     TypeOrmModule.forRoot({
       type: 'sqlite', // Или 'postgres', 'mysql'
       database: 'database.sqlite', // Или 'postgres://user:pass@localhost:5432/db'
@@ -22,6 +21,6 @@ import { TaskService } from './task/task.service';
     TypeOrmModule.forFeature([TaskEntity]), // Подключаем сущность задач
   ],
   controllers: [AppController],
-  providers: [AppService, TaskService],
+  providers: [AppService, TelegramService, TaskManagerService],
 })
-export class AppModule {}
+export class AppModule { }
