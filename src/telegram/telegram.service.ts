@@ -9,16 +9,18 @@ import { MessageContent } from '@langchain/core/messages';
 import { ChatCompletionMessageParam } from 'openai/resources';
 import { ToolCall } from '@langchain/core/dist/messages/tool';
 import { Runnable } from '@langchain/core/runnables';
+import { ChatPromptTemplate } from '@langchain/core/prompts';
 
 @Injectable()
 export class TelegramService implements OnModuleInit {
   private bot: TelegramBot;
-  private modelWithTools: Runnable;
-  private readonly prompt: string;
+  private model: Runnable;
   private memory: BufferMemory;
-  private taskManagerService: TaskManagerService;
 
-  constructor(private configService: ConfigService, taskManagerService: TaskManagerService) {
+  constructor(
+    private configService: ConfigService,
+    private taskManagerService: TaskManagerService,
+  ) {
     this.taskManagerService = taskManagerService;
 
     const TELEGRAM_BOT_TOKEN =
@@ -29,14 +31,15 @@ export class TelegramService implements OnModuleInit {
       throw new Error('Отсутствуют необходимые переменные окружения!');
     }
 
+
     this.bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-    this.modelWithTools = new ChatOpenAI({
+    this.model = new ChatOpenAI({
       model: 'gpt-4o-mini',
       temperature: 0,
-    }).bindTools(this.taskManagerService.tools);
+    }).bindTools(this.taskManagerService.tools)
 
     this.memory = new BufferMemory({ returnMessages: true });
-    this.prompt = PM_PROMPT;
+
   }
 
   onModuleInit() {
@@ -53,13 +56,10 @@ export class TelegramService implements OnModuleInit {
         );
 
         if (userMessage === '/start') {
-          await this.bot.sendMessage(
-            chatId,
-            WELCOME_MESSAGE,
-          );
+          await this.bot.sendMessage(chatId, WELCOME_MESSAGE);
         } else {
           const response = await this.sendMessageToModel(userMessage);
-          await this.bot.sendMessage(chatId, JSON.stringify(response));
+          await this.bot.sendMessage(chatId, String(response));
         }
       } catch (error) {
         console.error('Ошибка в Telegram-боте:', (error as Error).message);
@@ -67,26 +67,35 @@ export class TelegramService implements OnModuleInit {
     });
   }
 
-  private async sendMessageToModel(userMessage: string): Promise<MessageContent> {
+  private async sendMessageToModel(
+    userMessage: string,
+  ): Promise<MessageContent> {
     try {
       // Получаем историю
       const chatHistory = await this.memory.loadMemoryVariables({});
-      const messages: ChatCompletionMessageParam[] = Array.isArray(chatHistory.history)
+      const messages: ChatCompletionMessageParam[] = Array.isArray(
+        chatHistory.history,
+      )
         ? chatHistory.history
         : [];
 
       // Добавляем текущее сообщение пользователя
-      messages.push({ role: 'user', content: userMessage });
+      messages.push(
+        { role: 'user', content: userMessage }
+      );
 
       // Генерируем ответ модели
-      const response = await this.modelWithTools.invoke(messages);
+      const response = await this.model.invoke(messages);
+      console.log('Model response', response)
 
       let aiResponse = response.content ?? '';
 
       // Проверяем вызовы инструментов
       if (response.tool_calls) {
         for (const toolCall of response.tool_calls) {
-          const selectedTool = this.taskManagerService.toolsMap.get(toolCall.name);
+          const selectedTool = this.taskManagerService.toolsMap.get(
+            toolCall.name,
+          );
           if (selectedTool) {
             const toolMessage = await selectedTool.invoke(toolCall as ToolCall);
             aiResponse += '\n ' + toolMessage.content;
@@ -103,7 +112,7 @@ export class TelegramService implements OnModuleInit {
 
       return aiResponse;
     } catch (error) {
-      console.error('Ошибка OpenAI:', (error as Error).message);
+      console.error('Ошибка модели:', (error as Error).message);
       return 'Произошла ошибка при обращении к AI';
     }
   }
