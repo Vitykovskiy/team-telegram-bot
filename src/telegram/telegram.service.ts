@@ -5,17 +5,19 @@ import { BufferMemory } from 'langchain/memory';
 import TelegramBot, { Message } from 'node-telegram-bot-api';
 import { PM_PROMPT, WELCOME_MESSAGE } from './constants';
 import { TaskManagerService } from 'src/tools/task-manager/task-manager.service';
-import { MessageContent } from '@langchain/core/messages';
+import { MessageContent, SystemMessage } from '@langchain/core/messages';
 import { ChatCompletionMessageParam } from 'openai/resources';
 import { ToolCall } from '@langchain/core/dist/messages/tool';
 import { Runnable } from '@langchain/core/runnables';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
+import { InMemoryChatMessageHistory } from '@langchain/core/chat_history';
 
 @Injectable()
 export class TelegramService implements OnModuleInit {
   private bot: TelegramBot;
   private model: Runnable;
   private memory: BufferMemory;
+  private chatHistory: InMemoryChatMessageHistory;
 
   constructor(
     private configService: ConfigService,
@@ -31,19 +33,28 @@ export class TelegramService implements OnModuleInit {
       throw new Error('Отсутствуют необходимые переменные окружения!');
     }
 
-
     this.bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-    this.model = new ChatOpenAI({
+    const model = new ChatOpenAI({
       model: 'gpt-4o-mini',
       temperature: 0,
-    }).bindTools(this.taskManagerService.tools)
+    }).bindTools(this.taskManagerService.tools);
 
-    this.memory = new BufferMemory({ returnMessages: true });
+    this.chatHistory = new InMemoryChatMessageHistory();
 
+    this.memory = new BufferMemory({
+      chatHistory: this.chatHistory,
+      returnMessages: true,
+    });
+
+    const prompt = new ChatPromptTemplate(PM_PROMPT);
+
+    this.model = prompt.pipe(model);
   }
 
-  onModuleInit() {
+  async onModuleInit() {
     console.log('Telegram-бот запущен');
+
+    await this.chatHistory.addMessage(new SystemMessage(PM_PROMPT));
 
     this.bot.on('message', async (msg: Message) => {
       try {
@@ -59,7 +70,7 @@ export class TelegramService implements OnModuleInit {
           await this.bot.sendMessage(chatId, WELCOME_MESSAGE);
         } else {
           const response = await this.sendMessageToModel(userMessage);
-          await this.bot.sendMessage(chatId, String(response));
+          await this.bot.sendMessage(chatId, response);
         }
       } catch (error) {
         console.error('Ошибка в Telegram-боте:', (error as Error).message);
@@ -80,13 +91,11 @@ export class TelegramService implements OnModuleInit {
         : [];
 
       // Добавляем текущее сообщение пользователя
-      messages.push(
-        { role: 'user', content: userMessage }
-      );
+      messages.push({ role: 'user', content: userMessage });
 
       // Генерируем ответ модели
-      const response = await this.model.invoke(messages);
-      console.log('Model response', response)
+      const response: string = await this.model.invoke(messages);
+      console.log('Model response', response);
 
       let aiResponse = response.content ?? '';
 

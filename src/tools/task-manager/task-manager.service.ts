@@ -27,10 +27,20 @@ const tasksArraySchema = z.object({
 const filterTaskSchema = z.object({
   code: z.string().optional().describe('Номер задачи'),
   title: z.string().optional().describe('Название задачи'),
-  assignee: z.enum(['Аналитик', 'Разработчик', 'Тестировщик']).optional().describe('Исполнитель задачи'),
+  assignee: z
+    .enum(['Аналитик', 'Разработчик', 'Тестировщик'])
+    .optional()
+    .describe('Исполнитель задачи'),
   type: z.enum(['Epic', 'Story', 'Task']).optional().describe('Тип задачи'),
-  status: z.enum(['Новый', 'В работе', 'Завершен', 'Отменен']).optional().describe('Статус задачи'),
-  description: z.string().min(1, 'Описание задачи не может быть пустым').optional().describe('Описание задачи')
+  status: z
+    .enum(['Новый', 'В работе', 'Завершен', 'Отменен'])
+    .optional()
+    .describe('Статус задачи'),
+  description: z
+    .string()
+    .min(1, 'Описание задачи не может быть пустым')
+    .optional()
+    .describe('Описание задачи'),
 });
 
 @Injectable()
@@ -50,26 +60,30 @@ export class TaskManagerService {
       schema = tasksArraySchema;
 
       async _call(input: z.infer<typeof tasksArraySchema>): Promise<string> {
-        let createdTasks: TaskEntity[] = []
+        let createdTasks: TaskEntity[] = [];
         try {
           createdTasks = await taskService._createTasks(input.tasks);
-        }
-        catch (error) {
-          console.error('TaskManager _createTasks:', error)
+        } catch (error) {
+          console.error('TaskManager _createTasks:', error);
         }
 
-        const taskTitles = createdTasks.map((t) => `\n${t.code} - "${t.title}"`).join(', ');
+        const taskTitles = createdTasks
+          .map((t) => `\n${t.code} - "${t.title}"`)
+          .join(', ');
         return `Созданы задачи: ${taskTitles}`;
       }
     })();
 
     this.searchTasksToolInstance = new (class extends StructuredTool {
       name = 'searchTasks';
-      description = 'Поиск задач в БД по значению полей. Если все поля фильтра пустые - вернутся все задачи';
+      description =
+        'Поиск задач в БД по значению полей. Если все поля фильтра пустые - вернутся все задачи';
       schema = filterTaskSchema;
 
-      async _call(filter: z.infer<typeof filterTaskSchema>): Promise<TaskEntity[]> {
-        let tasks: TaskEntity[] = []
+      async _call(
+        filter: z.infer<typeof filterTaskSchema>,
+      ): Promise<TaskEntity[]> {
+        let tasks: TaskEntity[] = [];
         try {
           tasks = await taskService._searchTasks(filter);
         } catch (error) {
@@ -81,10 +95,7 @@ export class TaskManagerService {
   }
 
   public get tools(): StructuredTool[] {
-    return [
-      this.createTaskToolInstance,
-      this.searchTasksToolInstance
-    ];
+    return [this.createTaskToolInstance, this.searchTasksToolInstance];
   }
 
   public get toolsMap(): Map<string, StructuredTool> {
@@ -104,7 +115,7 @@ export class TaskManagerService {
   private async _searchTasks(
     filter: FindOptionsWhere<TaskEntity>,
   ): Promise<TaskEntity[]> {
-    console.log('_searchTasks', filter)
+    console.log('_searchTasks', filter);
     return this.taskRepository.find({
       where: filter,
     });

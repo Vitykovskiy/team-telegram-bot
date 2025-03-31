@@ -21,4 +21,4 @@ import { TelegramService } from './telegram/telegram.service';
   controllers: [],
   providers: [TelegramService],
 })
-export class AppModule { }
+export class AppModule {}

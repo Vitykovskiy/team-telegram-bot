@@ -4,8 +4,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { TaskEntity } from './task.entity';
 
 @Module({
-    imports: [TypeOrmModule.forFeature([TaskEntity])],
-    exports: [TaskManagerService],
-    providers: [TaskManagerService]
+  imports: [TypeOrmModule.forFeature([TaskEntity])],
+  exports: [TaskManagerService],
+  providers: [TaskManagerService],
 })
-export class TaskManagerModule { }
+export class TaskManagerModule {}
