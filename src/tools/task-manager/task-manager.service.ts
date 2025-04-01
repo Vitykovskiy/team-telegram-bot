@@ -26,21 +26,22 @@ const tasksArraySchema = z.object({
 
 const filterTaskSchema = z.object({
   code: z.string().optional().describe('Номер задачи'),
-  title: z.string().optional().describe('Название задачи'),
   assignee: z
-    .enum(['Аналитик', 'Разработчик', 'Тестировщик'])
-    .optional()
-    .describe('Исполнитель задачи'),
-  type: z.enum(['Epic', 'Story', 'Task']).optional().describe('Тип задачи'),
-  status: z
-    .enum(['Новый', 'В работе', 'Завершен', 'Отменен'])
-    .optional()
-    .describe('Статус задачи'),
-  description: z
     .string()
-    .min(1, 'Описание задачи не может быть пустым')
     .optional()
-    .describe('Описание задачи'),
+    .describe(
+      'Исполнитель задачи. Варианты значений: Аналитик, Разработчик, Тестировщик',
+    ),
+  type: z
+    .string()
+    .optional()
+    .describe('Тип задачи. Варианты значений: Epic, Story, Task'),
+  status: z
+    .string()
+    .optional()
+    .describe(
+      'Статус задачи. Варианты значений: Новый, В работе, Завершен, Отменен',
+    ),
 });
 
 @Injectable()
@@ -77,7 +78,7 @@ export class TaskManagerService {
     this.searchTasksToolInstance = new (class extends StructuredTool {
       name = 'searchTasks';
       description =
-        'Поиск задач в БД по значению полей. Если все поля фильтра пустые - вернутся все задачи';
+        'Поиск задач в БД по значению полей. Поля, по которым поиск не происходит, не должны заполняться';
       schema = filterTaskSchema;
 
       async _call(
@@ -113,11 +114,18 @@ export class TaskManagerService {
   }
 
   private async _searchTasks(
-    filter: FindOptionsWhere<TaskEntity>,
+    rawFilter: FindOptionsWhere<TaskEntity>,
   ): Promise<TaskEntity[]> {
-    console.log('_searchTasks', filter);
+    const cleanedFilter: FindOptionsWhere<TaskEntity> = Object.fromEntries(
+      Object.entries(rawFilter).filter(
+        ([, value]) =>
+          value !== undefined &&
+          !(typeof value === 'string' && value.trim() === ''),
+      ),
+    );
+
     return this.taskRepository.find({
-      where: filter,
+      where: cleanedFilter,
     });
   }
 }
