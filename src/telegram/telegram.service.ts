@@ -13,7 +13,7 @@ import {
   MessagesPlaceholder,
 } from '@langchain/core/prompts';
 import { InMemoryChatMessageHistory } from '@langchain/core/chat_history';
-import { ToolCall } from '@langchain/core/dist/messages/tool';
+import { ToolCall, ToolMessage } from '@langchain/core/dist/messages/tool';
 
 @Injectable()
 export class TelegramService implements OnModuleInit {
@@ -98,23 +98,43 @@ export class TelegramService implements OnModuleInit {
         { input: userMessage },
         { configurable: { sessionId: chatId } },
       );
-      // Проверяем вызовы инструментов
-      if (response.tool_calls?.length) {
-        const aiResponse: string[] = [];
 
-        for (const toolCall of response.tool_calls) {
+      const toolCalls = response.additional_kwargs?.tool_calls ?? [];
+
+      if (toolCalls.length) {
+        const aiResponse: string[] = [];
+        const history = this.sessions.get(chatId);
+
+        for (const toolCall of toolCalls) {
           const selectedTool = this.taskManagerService.toolsMap.get(
             toolCall.name,
           );
-          if (selectedTool) {
-            const toolMessage = await selectedTool.invoke(toolCall as ToolCall);
-            aiResponse.push(toolMessage.content);
+
+          if (selectedTool && history) {
+            const toolResult = await selectedTool.invoke(toolCall as ToolCall);
+
+            const resultText = Array.isArray(toolResult)
+              ? JSON.stringify(toolResult, null, 2)
+              : String(toolResult);
+
+            // КРИТИЧЕСКИ ВАЖНО: сохраняем ToolMessage в историю!
+            await history.addMessage(
+              new ToolMessage({
+                tool_call_id: toolCall.id,
+                content: resultText,
+              }),
+            );
+
+            aiResponse.push(resultText);
           } else {
-            aiResponse.push('Ошибка инструмента: ' + toolCall.name);
+            const errorMsg = `Ошибка инструмента: ${toolCall.name}`;
+            aiResponse.push(errorMsg);
           }
         }
-        return JSON.stringify(aiResponse);
+
+        return aiResponse.join('\n\n');
       }
+
       return response.content;
     } catch (error) {
       console.error('Ошибка модели:', (error as Error).message);
